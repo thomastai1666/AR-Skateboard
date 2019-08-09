@@ -10,12 +10,17 @@ import UIKit
 import SceneKit
 import ARKit
 
+//References and Sources
+//https://developer.apple.com/documentation/arkit/tracking_and_visualizing_planes?language=objc
+//https://3dwarehouse.sketchup.com/model/8cce68d3f0e42e43dda82f1bd87e9e6a/Penny-Board?hl=en
+
 class ViewController: UIViewController, ARSCNViewDelegate {
 
     @IBOutlet var sceneView: ARSCNView!
     
     var lightNodes = [SCNNode]()
     var feedbackGenerator : UIImpactFeedbackGenerator? = nil
+    var debugMode = true
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -23,16 +28,19 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Set the view's delegate
         sceneView.delegate = self
         
-        // Show statistics such as fps and timing information
-        sceneView.showsStatistics = true
-        
         // Create a new scene
         let scene = SCNScene(named: "art.scnassets/newscene.scn")!
-        sceneView.debugOptions = [ARSCNDebugOptions.showFeaturePoints]
+        
+        // Show statistics such as fps and timing information
+        if(debugMode){
+            sceneView.showsStatistics = true
+            sceneView.debugOptions = [ARSCNDebugOptions.showFeaturePoints]
+        }
         
         // Set the scene to the view
         sceneView.scene = scene
         sceneView.autoenablesDefaultLighting = false
+        sceneView.automaticallyUpdatesLighting = false
         
         //Create new feedback generator
         feedbackGenerator = UIImpactFeedbackGenerator()
@@ -44,14 +52,15 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Create a session configuration
         let configuration = ARWorldTrackingConfiguration()
         
-        //check for horizontal plane
+        //Change configuration options
         configuration.planeDetection = .horizontal
+        configuration.environmentTexturing = .automatic
 
         // Run the view's session
         sceneView.session.run(configuration)
         
         //add scene lighting
-        let lightNode = getLightNode()
+        let lightNode = createLightNode()
         self.sceneView.scene.rootNode.addChildNode(lightNode)
     }
     
@@ -73,32 +82,40 @@ class ViewController: UIViewController, ARSCNViewDelegate {
     }
     
     func createSkateboard(position: SCNVector3){
+        //Create new skateboard node from scene
         let SBScene = SCNScene(named: "art.scnassets/pennyboard.scn")!
-        let SBNode = SBScene.rootNode.childNode(withName: "SketchUp", recursively: false)!
+        let SBNode = SBScene.rootNode.childNode(withName: "Skateboard", recursively: false)!
+        
+        //Position and scale down
         SBNode.position = position
-        SBNode.scale = SCNVector3(0.00001, 0.00001, 0.00001)
-        sceneView.scene.rootNode.addChildNode(SBNode)
+        SBNode.scale = SCNVector3(0.005, 0.005, 0.005)
         feedbackGenerator?.impactOccurred()
+        
+        //Add to scene and scale up
+        sceneView.scene.rootNode.addChildNode(SBNode)
         let scaleAction = SCNAction.scale(by: 100, duration: 0.5)
-        //let rotateAction = SCNAction.rotateBy(x: 0, y: .pi/2, z: 0, duration: 0.5)
         let action = SCNAction.group([scaleAction])
         SBNode.runAction(action)
     }
     
-    func getLightNode() -> SCNNode {
+    func createLightNode() -> SCNNode {
+        //Create light source
         let light = SCNLight()
         light.type = .omni
         light.intensity = 2000
         light.temperature = 5000
+        light.castsShadow = true
         
+        //Add to scene
         let lightNode = SCNNode()
         lightNode.light = light
-        lightNode.position = SCNVector3(0,10,0)
+        lightNode.position = SCNVector3(5,10,0)
         
+        //Add to array for updates
         lightNodes.append(lightNode)
-        
         return lightNode
     }
+    
     func updateLightNodesLightEstimation() {
         DispatchQueue.main.async {
             guard let lightEstimate = self.sceneView.session.currentFrame?.lightEstimate
@@ -117,6 +134,40 @@ class ViewController: UIViewController, ARSCNViewDelegate {
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         updateLightNodesLightEstimation()
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        //ARKit add anchors for detected planes
+        guard let planeAnchor = anchor as? ARPlaneAnchor else{ return}
+        
+        //Create new SCNPlane
+        let plane = SCNPlane(width: CGFloat(planeAnchor.extent.x), height: CGFloat(planeAnchor.extent.z))
+        
+        //Show plane if in debug mode
+        if(debugMode){
+            plane.materials.first?.diffuse.contents = UIColor.init(white: 0, alpha: 0.5)
+        }
+        else{
+            plane.materials.first?.diffuse.contents = UIColor.init(white: 0, alpha: 0)
+        }
+        
+        //Add plane to scene
+        let planenode = SCNNode(geometry: plane)
+        planenode.simdPosition = planeAnchor.center
+        planenode.eulerAngles.x = -.pi / 2
+        node.addChildNode(planenode)
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let planeAnchor = anchor as? ARPlaneAnchor,
+            let planeNode = node.childNodes.first,
+            let plane = planeNode.geometry as? SCNPlane
+            else { return }
+        
+        plane.width = CGFloat(planeAnchor.extent.x)
+        plane.height = CGFloat(planeAnchor.extent.z)
+        
+        planeNode.simdPosition = planeAnchor.center
     }
     
     // MARK: - ARSCNViewDelegate
